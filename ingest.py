@@ -296,6 +296,11 @@ def save_manifest(manifest: Dict[str, float], manifest_path: str):
     with open(manifest_path, "w", encoding="utf8") as f:
         json.dump(manifest, f, indent=2)
 
+def _persist_if_supported(vectordb) -> None:
+    persist = getattr(vectordb, "persist", None)
+    if callable(persist):
+        persist()
+
 def persist_chunks_upsert(chunks: List[Dict[str, Any]], persist_directory: str, embeddings):
     """Upsert chunks into an existing Chroma DB (create DB if missing)."""
     texts = [c["page_content"] for c in chunks]
@@ -305,14 +310,14 @@ def persist_chunks_upsert(chunks: List[Dict[str, Any]], persist_directory: str, 
         vectordb = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
         try:
             vectordb.add_texts(texts, metadatas=metadatas)
-            vectordb.persist()
+            _persist_if_supported(vectordb)
         except Exception as e:
             print("Warning: add_texts failed, recreating DB. Error:", e)
             vectordb = Chroma.from_texts(texts, embeddings, metadatas=metadatas, persist_directory=persist_directory)
-            vectordb.persist()
+            _persist_if_supported(vectordb)
     else:
         vectordb = Chroma.from_texts(texts, embeddings, metadatas=metadatas, persist_directory=persist_directory)
-        vectordb.persist()
+        _persist_if_supported(vectordb)
     return vectordb
 
 def run_ingest(upsert: bool = True):
