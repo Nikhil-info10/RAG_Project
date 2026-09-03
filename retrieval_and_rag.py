@@ -537,10 +537,14 @@ def main():
             break
 
         search_query = build_search_query(q, conversation_history)
-        is_employee_follow_up = is_employee_question(q) or any(
-            is_employee_question(turn.get("content", ""))
-            for turn in conversation_history
-            if turn.get("role") == "user"
+        current_query = q.lower()
+        has_unrelated_intent = any(term in current_query for term in NON_EMPLOYEE_TERMS)
+        is_employee_follow_up = not has_unrelated_intent and (
+            is_employee_question(q) or any(
+                is_employee_question(turn.get("content", ""))
+                for turn in conversation_history
+                if turn.get("role") == "user"
+            )
         )
         vector_results = db.similarity_search(search_query, k=10)
         keyword_results = bm25_retriever.invoke(search_query)

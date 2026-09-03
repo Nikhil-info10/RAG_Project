@@ -62,10 +62,13 @@ def answer_question(
 
     current_query = question.lower()
     is_policy_question = any(term in current_query for term in rag.POLICY_TERMS)
-    is_employee_follow_up = rag.is_employee_question(question) or any(
-        rag.is_employee_question(turn.get("content", ""))
-        for turn in history
-        if turn.get("role") == "user"
+    has_unrelated_intent = any(term in current_query for term in rag.NON_EMPLOYEE_TERMS)
+    is_employee_follow_up = not has_unrelated_intent and (
+        rag.is_employee_question(question) or any(
+            rag.is_employee_question(turn.get("content", ""))
+            for turn in history
+            if turn.get("role") == "user"
+        )
     )
     employee_answer = None
     if not is_policy_question:
