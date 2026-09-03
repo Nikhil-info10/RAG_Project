@@ -62,6 +62,11 @@ def answer_question(
 
     current_query = question.lower()
     is_policy_question = any(term in current_query for term in rag.POLICY_TERMS)
+    is_employee_follow_up = rag.is_employee_question(question) or any(
+        rag.is_employee_question(turn.get("content", ""))
+        for turn in history
+        if turn.get("role") == "user"
+    )
     employee_answer = None
     if not is_policy_question:
         employee_answer = rag.answer_from_employee_data(
@@ -75,13 +80,15 @@ def answer_question(
         return employee_answer, ["InnoCorp_Solutions_Employee_Details.xlsx"]
 
     context_docs = reranked
-    if is_policy_question or not rag.is_employee_question(question):
+    if is_policy_question or not is_employee_follow_up:
         context_docs = [
             doc
             for doc in reranked
             if "Employee_Details.xlsx" not in str(rag.document_metadata(doc).get("source", ""))
         ]
     if not context_docs:
+        if is_employee_follow_up:
+            return rag.NOT_FOUND_MESSAGE, []
         answer = rag.answer_from_external_search(question)
         if answer.startswith(("External search failed", "No LLM provider", "[LLM call failed:")) or answer == "No web results found.":
             raise RuntimeError(answer)
@@ -90,6 +97,8 @@ def answer_question(
     context = rag.assemble_context(context_docs, rag.MAX_CONTEXT_CHARS)
     answer = rag.call_llm(rag.build_prompt(context, search_query, history))
     if rag.needs_external_search(answer):
+        if is_employee_follow_up:
+            return rag.NOT_FOUND_MESSAGE, source_documents(context_docs)
         answer = rag.answer_from_external_search(question)
         if answer.startswith(("External search failed", "No LLM provider", "[LLM call failed:")) or answer == "No web results found.":
             raise RuntimeError(answer)

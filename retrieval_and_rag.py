@@ -502,7 +502,11 @@ def build_search_query(question: str, conversation_history: List[Dict[str, str]]
     if not recent_user_questions:
         return question
 
-    return f"Previous question: {recent_user_questions[-1]}\nFollow-up question: {question}"
+    previous_questions = "\n".join(
+        f"Previous question: {previous_question}"
+        for previous_question in recent_user_questions
+    )
+    return f"{previous_questions}\nFollow-up question: {question}"
 
 def main():
     print("Loading embeddings and Chroma DB...")
@@ -533,6 +537,11 @@ def main():
             break
 
         search_query = build_search_query(q, conversation_history)
+        is_employee_follow_up = is_employee_question(q) or any(
+            is_employee_question(turn.get("content", ""))
+            for turn in conversation_history
+            if turn.get("role") == "user"
+        )
         vector_results = db.similarity_search(search_query, k=10)
         keyword_results = bm25_retriever.invoke(search_query)
         combined = vector_results + keyword_results
@@ -558,6 +567,16 @@ def main():
             continue
 
         # If no local results, go external
+        if not reranked_results and is_employee_follow_up:
+            answer = NOT_FOUND_MESSAGE
+            print("\n" + answer.strip())
+            conversation_history.extend([
+                {"role": "user", "content": q},
+                {"role": "assistant", "content": answer.strip()},
+            ])
+            conversation_history = conversation_history[-MAX_HISTORY_TURNS:]
+            continue
+
         if not reranked_results:
             answer = answer_from_external_search(q)
             print("\n" + answer.strip())
@@ -570,7 +589,7 @@ def main():
 
         # Otherwise, use local context + LLM
         context_docs = reranked_results
-        if any(term in q.lower() for term in POLICY_TERMS) or not is_employee_question(q):
+        if any(term in q.lower() for term in POLICY_TERMS) or not is_employee_follow_up:
             context_docs = [
                 doc
                 for doc in reranked_results
@@ -583,7 +602,7 @@ def main():
         answer = call_llm(prompt)
 
         if needs_external_search(answer):
-            answer = answer_from_external_search(q)
+            answer = NOT_FOUND_MESSAGE if is_employee_follow_up else answer_from_external_search(q)
 
         answer = add_sources(answer, context_docs)
         print("\n" + answer.strip())
